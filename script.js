@@ -28,7 +28,7 @@ class MathChatBot {
         // Contador para gráficas únicas
         this.chartCount = 0;
         
-        // URLs del backend - ACTUALIZADO PARA PRODUCCIÓN
+        // URLs del backend - MEJORADO PARA PRODUCCIÓN
         this.apiUrl = this.getApiUrl() + '/api/chat';
         this.healthUrl = this.getApiUrl() + '/health';
         
@@ -64,7 +64,7 @@ class MathChatBot {
     
     getApiUrl() {
         """Obtener URL base de la API según el entorno"""
-        // En producción, usar la URL actual
+        // En desarrollo local
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
             return 'http://localhost:5000';
         } else {
@@ -375,7 +375,10 @@ class MathChatBot {
             }
         } catch (error) {
             this.updateStatus('Sin conexión', 'disconnected');
-            console.error('Error de conexión:', error);
+            // Solo hacer console.log en desarrollo
+            if (window.location.hostname === 'localhost') {
+                console.error('Error de conexión:', error);
+            }
         }
     }
     
@@ -443,11 +446,14 @@ class MathChatBot {
                 const errorData = await response.json().catch(() => ({}));
                 this.addMessage('Lo siento, hubo un problema con el servidor. Inténtalo de nuevo.', 'bot');
                 this.updateStatus('Error', 'error');
-                console.error('Error del servidor:', errorData);
+                
+                // Solo hacer console.log en desarrollo
+                if (window.location.hostname === 'localhost') {
+                    console.error('Error del servidor:', errorData);
+                }
             }
             
         } catch (error) {
-            console.error('Error:', error);
             this.hideTypingIndicator();
             
             if (error.name === 'AbortError') {
@@ -457,6 +463,11 @@ class MathChatBot {
             }
             
             this.updateStatus('Sin conexión', 'disconnected');
+            
+            // Solo hacer console.log en desarrollo
+            if (window.location.hostname === 'localhost') {
+                console.error('Error:', error);
+            }
         }
         
         this.setInputsEnabled(true);

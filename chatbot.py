@@ -20,9 +20,14 @@ class MathChatBot:
         self.last_result = None
         self.variables = {}
         
-        # API Key de Google Gemini
-        self.api_key = os.getenv('GEMINI_API_KEY', 'AIzaSyCouIoWAcxNKKSY64Flfv3N9R-QKaLs_Cw')
-        self.gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+        # API Key de Google Gemini - SOLO desde variable de entorno
+        self.api_key = os.getenv('GEMINI_API_KEY')
+        if not self.api_key:
+            print("⚠️ ADVERTENCIA: GEMINI_API_KEY no configurada. IA funcionará en modo fallback.")
+            self.ai_available = False
+        else:
+            self.ai_available = True
+            self.gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
         
         # Operadores seguros para evaluación
         self.operators = {
@@ -51,11 +56,15 @@ class MathChatBot:
         
         print("🧠 ChatBot con IA matemática y gráficas inicializado")
         
-        # Probar conexión con IA
-        self.test_ai_connection()
+        # Probar conexión con IA solo si está disponible
+        if self.ai_available:
+            self.test_ai_connection()
     
     def test_ai_connection(self):
         """Probar si la conexión con Google Gemini funciona"""
+        if not self.ai_available:
+            return False
+            
         try:
             test_response = self.get_ai_response_sync("Responde solo: OK")
             if test_response and "ok" in test_response.lower():
@@ -63,9 +72,11 @@ class MathChatBot:
                 return True
             else:
                 print("⚠️ Problema con la IA, funcionando en modo fallback")
+                self.ai_available = False
                 return False
         except Exception as e:
             print(f"⚠️ Error probando IA: {str(e)}")
+            self.ai_available = False
             return False
     
     def is_chart_request(self, message):
@@ -516,6 +527,9 @@ class MathChatBot:
     
     def get_ai_response_sync(self, message):
         """Obtener respuesta de la IA de forma síncrona"""
+        if not self.ai_available:
+            return None
+            
         try:
             # Crear prompt especializado en matemáticas
             system_prompt = """Eres un profesor de matemáticas experto, amigable y conversacional. Tu trabajo es:
@@ -668,7 +682,7 @@ Si es una conversación general relacionada con matemáticas, mantén el context
                     chart_data = self.generate_chart_data(chart_info)
                     
                     if chart_data:
-                        # Usar IA para explicar la gráfica
+                        # Usar IA para explicar la gráfica si está disponible
                         function_names = []
                         for f in chart_info['functions']:
                             if isinstance(f, dict):
@@ -679,11 +693,13 @@ Si es una conversación general relacionada con matemáticas, mantén el context
                             else:
                                 function_names.append(f)
                         
-                        ai_explanation = self.get_ai_response_sync(
-                            f"El usuario pidió graficar {', '.join(function_names)}. Explica brevemente estas funciones matemáticas y sus características principales."
-                        )
-                        
-                        response_text = ai_explanation if ai_explanation else f"Aquí tienes la gráfica de {', '.join(function_names)}."
+                        if self.ai_available:
+                            ai_explanation = self.get_ai_response_sync(
+                                f"El usuario pidió graficar {', '.join(function_names)}. Explica brevemente estas funciones matemáticas y sus características principales."
+                            )
+                            response_text = ai_explanation if ai_explanation else f"Aquí tienes la gráfica de {', '.join(function_names)}."
+                        else:
+                            response_text = f"Aquí tienes la gráfica de {', '.join(function_names)}. (IA no disponible para explicación detallada)"
                         
                         # Guardar en historial
                         self.conversation_history.append((message, response_text))
@@ -721,16 +737,20 @@ Si es una conversación general relacionada con matemáticas, mantén el context
                     
                     print(f"✅ Resultado calculado: {formatted_result}")
                     
-                    # Usar IA para enriquecer la respuesta con explicación
-                    ai_explanation = self.get_ai_response_sync(
-                        f"El usuario calculó '{expression}' y obtuve como resultado {formatted_result}. Explica brevemente esta operación matemática y proporciona contexto educativo relevante. Sé conciso pero informativo."
-                    )
-                    
-                    if ai_explanation:
-                        response_text = f"**Resultado:** {formatted_result}\n\n{ai_explanation}"
+                    # Usar IA para enriquecer la respuesta con explicación si está disponible
+                    if self.ai_available:
+                        ai_explanation = self.get_ai_response_sync(
+                            f"El usuario calculó '{expression}' y obtuve como resultado {formatted_result}. Explica brevemente esta operación matemática y proporciona contexto educativo relevante. Sé conciso pero informativo."
+                        )
+                        
+                        if ai_explanation:
+                            response_text = f"**Resultado:** {formatted_result}\n\n{ai_explanation}"
+                        else:
+                            # Explicación básica si la IA falla
+                            response_text = f"**Resultado:** {formatted_result}\n\nEste es el resultado de calcular: {expression}"
                     else:
-                        # Explicación básica si la IA falla
-                        response_text = f"**Resultado:** {formatted_result}\n\nEste es el resultado de calcular: {expression}"
+                        # Explicación básica si IA no está disponible
+                        response_text = f"**Resultado:** {formatted_result}\n\nEste es el resultado de calcular: {expression} (IA no disponible para explicación detallada)"
                     
                     # Guardar en historial
                     self.conversation_history.append((message, response_text))
@@ -748,27 +768,28 @@ Si es una conversación general relacionada con matemáticas, mantén el context
                     pass
             
             # PASO 3: Usar IA para respuesta conversacional
-            print("🧠 Consultando IA...")
-            ai_response = self.get_ai_response_sync(message)
+            if self.ai_available:
+                print("🧠 Consultando IA...")
+                ai_response = self.get_ai_response_sync(message)
+                
+                if ai_response:
+                    print("✅ Respuesta de IA obtenida")
+                    # Guardar en historial
+                    self.conversation_history.append((message, ai_response))
+                    if len(self.conversation_history) > 5:
+                        self.conversation_history.pop(0)
+                    return {
+                        'response': ai_response,
+                        'type': 'conversation'
+                    }
             
-            if ai_response:
-                print("✅ Respuesta de IA obtenida")
-                # Guardar en historial
-                self.conversation_history.append((message, ai_response))
-                if len(self.conversation_history) > 5:
-                    self.conversation_history.pop(0)
-                return {
-                    'response': ai_response,
-                    'type': 'conversation'
-                }
-            else:
-                # PASO 4: Usar respuestas de fallback
-                print("⚠️ IA no disponible, usando fallback")
-                fallback_response = self.get_fallback_response(message)
-                return {
-                    'response': fallback_response,
-                    'type': 'fallback'
-                }
+            # PASO 4: Usar respuestas de fallback
+            print("⚠️ IA no disponible, usando fallback")
+            fallback_response = self.get_fallback_response(message)
+            return {
+                'response': fallback_response,
+                'type': 'fallback'
+            }
                 
         except Exception as e:
             print(f"❌ Error general en get_response: {str(e)}")
@@ -791,5 +812,6 @@ Si es una conversación general relacionada con matemáticas, mantén el context
             'messages_in_context': len(self.context),
             'conversation_history': len(self.conversation_history),
             'last_result': self.last_result,
-            'variables_defined': len(self.variables)
+            'variables_defined': len(self.variables),
+            'ai_available': self.ai_available
         }
