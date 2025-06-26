@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatBot Matemático</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <img src="logo.jpeg" alt="Logo" class="logo-header">
+            <h2>CUCHAO CHAT</h2>
+            <span class="status" id="status">Conectando...</span>
+        </div>
+        
+        <div class="welcome-panel" id="welcomePanel">
+            <div class="welcome-content">
+                <h3>¡Bienvenido! 👋</h3>
+                <p>Soy ⚡ tu asistente matemático con IA y gráficas. Puedo:</p>
+                <div class="welcome-options">
+                    <div class="option-card" onclick="selectCategory('ejemplos')">
+                        <span class="option-icon">⚡</span>
+                        <span class="option-text">Ver Ejemplos</span>
+                    </div>
+                    <div class="option-card" onclick="selectCategory('graficas')">
+                        <span class="option-icon">📊</span>
+                        <span class="option-text">Hacer Gráficas</span>
+                    </div>
+                    <div class="option-card" onclick="selectCategory('escribir')">
+                        <span class="option-icon">✍️</span>
+                        <span class="option-text">Escribir Directo</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Categories -->
+        <div class="categories-panel" id="categoriesPanel" style="display: none;">
+            <div class="category-title">📚 Elige una categoría:</div>
+            <div class="categories-grid">
+                <button class="category-btn" onclick="showExamples('basico')">
+                    <span class="cat-icon">➕</span>
+                    <span class="cat-text">Aritmética Básica</span>
+                </button>
+                <button class="category-btn" onclick="showExamples('funciones')">
+                    <span class="cat-icon">📈</span>
+                    <span class="cat-text">Funciones</span>
+                </button>
+                <button class="category-btn" onclick="showExamples('conceptos')">
+                    <span class="cat-icon">🧠</span>
+                    <span class="cat-text">Conceptos</span>
+                </button>
+                <button class="category-btn" onclick="showExamples('graficas')">
+                    <span class="cat-icon">📊</span>
+                    <span class="cat-text">Gráficas</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Chart Categories Panel -->
+        <div class="charts-panel" id="chartsPanel" style="display: none;">
+            <div class="category-title">📊 Ejemplos de gráficas:</div>
+            <div class="charts-grid">
+                <button class="chart-btn" onclick="sendExample('grafica sin(x)')">
+                    <span class="chart-icon">〜</span>
+                    <span class="chart-text">sin(x)</span>
+                </button>
+                <button class="chart-btn" onclick="sendExample('grafica cos(x)')">
+                    <span class="chart-icon">∩</span>
+                    <span class="chart-text">cos(x)</span>
+                </button>
+                <button class="chart-btn" onclick="sendExample('grafica x^2')">
+                    <span class="chart-icon">∪</span>
+                    <span class="chart-text">x²</span>
+                </button>
+                <button class="chart-btn" onclick="sendExample('grafica log(x)')">
+                    <span class="chart-icon">⌐</span>
+                    <span class="chart-text">log(x)</span>
+                </button>
+                <button class="chart-btn" onclick="sendExample('compara sin(x) vs cos(x)')">
+                    <span class="chart-icon">≈</span>
+                    <span class="chart-text">Comparar</span>
+                </button>
+                <button class="chart-btn" onclick="sendExample('grafica tan(x)')">
+                    <span class="chart-icon">⟋</span>
+                    <span class="chart-text">tan(x)</span>
+                </button>
+            </div>
+            <button class="back-btn" onclick="showCategories()">← Cambiar categoría</button>
+        </div>
+
+        <!-- Quick Examples Panel -->
+        <div class="examples-panel" id="examplesPanel" style="display: none;">
+            <div class="examples-title">⚡ Ejemplos rápidos - <span id="currentCategory">Aritmética</span>:</div>
+            <div class="examples-grid" id="examplesGrid">
+                <!-- Se llena dinámicamente -->
+            </div>
+            <button class="back-btn" onclick="showCategories()">← Cambiar categoría</button>
+        </div>
+
+        <!-- Math Keyboard -->
+        <div class="math-keyboard" id="mathKeyboard" style="display: none;">
+            <div class="keyboard-title">🔢 Teclado Matemático:</div>
+            <div class="keyboard-grid">
+                <button class="key-btn operator" onclick="insertSymbol('+')">+</button>
+                <button class="key-btn operator" onclick="insertSymbol('-')">−</button>
+                <button class="key-btn operator" onclick="insertSymbol('*')">×</button>
+                <button class="key-btn operator" onclick="insertSymbol('/')"÷</button>
+                <button class="key-btn function" onclick="insertFunction('sqrt()')">√</button>
+                <button class="key-btn function" onclick="insertFunction('sin()')">sin</button>
+                <button class="key-btn function" onclick="insertFunction('cos()')">cos</button>
+                <button class="key-btn function" onclick="insertFunction('log()')">log</button>
+                <button class="key-btn constant" onclick="insertSymbol('pi')">π</button>
+                <button class="key-btn constant" onclick="insertSymbol('e')">e</button>
+                <button class="key-btn operator" onclick="insertSymbol('**')">x²</button>
+                <button class="key-btn operator" onclick="insertSymbol('(')">(</button>
+                <button class="key-btn operator" onclick="insertSymbol(')')">)</button>
+                <button class="key-btn clear" onclick="clearInput()">C</button>
+            </div>
+        </div>
+
+        <!-- Chat Messages -->
+        <div class="chat-messages" id="chatMessages">
+            <div class="message bot-message">
+                <div class="message-content">
+                    ¡Hola! Soy tu asistente matemático con IA y capacidad de generar gráficas. Usa los botones de arriba para empezar, o escribe directamente tu problema matemático o solicitud de gráfica.
+                </div>
+                <div class="message-time" id="welcomeTime"></div>
+            </div>
+        </div>
+        
+        <!-- Input Area -->
+        <div class="chat-input">
+            <div class="input-tools">
+                <button class="tool-btn" id="keyboardToggle" onclick="toggleKeyboard()" title="Teclado matemático">
+                    🔢
+                </button>
+                <button class="tool-btn" id="examplesToggle" onclick="toggleExamples()" title="Ver ejemplos">
+                    ⚡
+                </button>
+                <button class="tool-btn" id="chartsToggle" onclick="toggleCharts()" title="Ejemplos de gráficas">
+                    📊
+                </button>
+                <button class="tool-btn" id="helpToggle" onclick="showHelp()" title="Ayuda">
+                    ❓
+                </button>
+            </div>
+            <div class="input-container">
+                <input type="text" id="messageInput" placeholder="Escribe: 2+2, qué es pi, grafica sin(x), etc." maxlength="500">
+                <button id="sendButton">Enviar</button>
+            </div>
+            <div class="suggestions" id="suggestions" style="display: none;">
+                <!-- Sugerencias dinámicas -->
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
