@@ -63,7 +63,7 @@ class MathChatBot {
     }
     
     getApiUrl() {
-        """Obtener URL base de la API según el entorno"""
+        // Obtener URL base de la API según el entorno
         // En desarrollo local
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
             return 'http://localhost:5000';
