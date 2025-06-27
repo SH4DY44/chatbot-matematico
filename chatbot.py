@@ -4,6 +4,7 @@ import random
 import requests
 import json
 import os
+import time
 from decimal import Decimal, getcontext
 from fractions import Fraction
 import ast
@@ -19,6 +20,10 @@ class MathChatBot:
         self.conversation_history = []
         self.last_result = None
         self.variables = {}
+        
+        # Rate limiting para la IA
+        self.last_api_call = 0
+        self.min_interval = 1.5  # 1.5 segundos entre llamadas a la IA
         
         # API Key de Google Gemini - SOLO desde variable de entorno
         self.api_key = os.getenv('GEMINI_API_KEY')
@@ -90,6 +95,16 @@ class MathChatBot:
             'sin', 'cos', 'tan', 'log', 'exp', 'sqrt', 'abs',
             'x^2', 'x²', 'x^3', 'x³', 'cuadrática', 'cúbica', 'f(x)'
         ]
+        
+        # Palabras que NO son gráficas (para evitar falsos positivos)
+        exclude_keywords = [
+            'despejar', 'resolver', 'ecuacion', 'ecuación', 'resultado de',
+            'calcular', 'cuanto', 'cuánto', 'valor de'
+        ]
+        
+        # Verificar exclusiones primero
+        if any(keyword in message.lower() for keyword in exclude_keywords):
+            return False
         
         # Verificar palabras clave de gráficas
         has_chart_keyword = any(keyword in message.lower() for keyword in chart_keywords)
@@ -526,13 +541,36 @@ class MathChatBot:
         return message.strip()
     
     def get_ai_response_sync(self, message):
-        """Obtener respuesta de la IA de forma síncrona"""
+        """Obtener respuesta de la IA de forma síncrona con rate limiting mejorado"""
         if not self.ai_available:
             return None
-            
-        try:
-            # Crear prompt especializado en matemáticas
-            system_prompt = """Eres un profesor de matemáticas experto, amigable y conversacional. Tu trabajo es:
+        
+        # === RATE LIMITING INTELIGENTE ===
+        current_time = time.time()
+        time_since_last = current_time - self.last_api_call
+        
+        if time_since_last < self.min_interval:
+            sleep_time = self.min_interval - time_since_last
+            print(f"⏳ Rate limiting: esperando {sleep_time:.1f}s")
+            time.sleep(sleep_time)
+        
+        # === RETRY LOGIC CON BACKOFF EXPONENCIAL ===
+        max_retries = 3
+        base_delay = 1
+        
+        for attempt in range(max_retries):
+            try:
+                self.last_api_call = time.time()
+                
+                # Si es un retry, agregar delay adicional
+                if attempt > 0:
+                    retry_delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    print(f"🔄 Reintento {attempt + 1}/{max_retries} después de {retry_delay:.1f}s")
+                    time.sleep(retry_delay)
+                    self.last_api_call = time.time()  # Actualizar después del delay
+                
+                # Crear prompt especializado en matemáticas
+                system_prompt = """Eres un profesor de matemáticas experto, amigable y conversacional. Tu trabajo es:
 
 1. Responder preguntas matemáticas con explicaciones claras y educativas
 2. Explicar conceptos matemáticos de forma comprensible y profunda
@@ -545,82 +583,104 @@ Si el usuario hace una pregunta matemática, explica tanto el "qué" como el "po
 Si pregunta sobre conceptos, da explicaciones profundas pero accesibles.
 Si es una conversación general relacionada con matemáticas, mantén el contexto educativo."""
 
-            # Construir contexto de conversación si existe
-            conversation_context = ""
-            if self.conversation_history:
-                recent_messages = self.conversation_history[-3:]  # Últimos 3 intercambios
-                conversation_context = "\n\nContexto de conversación previa:\n"
-                for user_msg, bot_response in recent_messages:
-                    conversation_context += f"Usuario: {user_msg}\nAsistente: {bot_response[:150]}...\n"
-            
-            full_prompt = f"{system_prompt}\n\nPregunta actual del usuario: {message}{conversation_context}"
-            
-            # Estructura de payload actualizada para gemini-1.5-flash
-            payload = {
-                "contents": [{
-                    "parts": [{
-                        "text": full_prompt
-                    }]
-                }],
-                "generationConfig": {
-                    "temperature": 0.7,
-                    "topK": 40,
-                    "topP": 0.95,
-                    "maxOutputTokens": 1024,
-                    "candidateCount": 1,
-                    "stopSequences": []
-                },
-                "safetySettings": [
-                    {
-                        "category": "HARM_CATEGORY_HARASSMENT",
-                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_HATE_SPEECH", 
-                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                    },
-                    {
-                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                    }
-                ]
-            }
-            
-            response = requests.post(
-                self.gemini_url,
-                headers={
-                    'Content-Type': 'application/json',
-                    'x-goog-api-key': self.api_key
-                },
-                json=payload,
-                timeout=15
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
+                # Construir contexto de conversación si existe
+                conversation_context = ""
+                if self.conversation_history:
+                    recent_messages = self.conversation_history[-3:]  # Últimos 3 intercambios
+                    conversation_context = "\n\nContexto de conversación previa:\n"
+                    for user_msg, bot_response in recent_messages:
+                        conversation_context += f"Usuario: {user_msg}\nAsistente: {bot_response[:150]}...\n"
                 
-                if 'candidates' in data and len(data['candidates']) > 0:
-                    candidate = data['candidates'][0]
-                    if 'content' in candidate and 'parts' in candidate['content']:
-                        ai_response = candidate['content']['parts'][0]['text']
-                        return ai_response.strip()
+                full_prompt = f"{system_prompt}\n\nPregunta actual del usuario: {message}{conversation_context}"
                 
-                print("⚠️ Respuesta inesperada de la IA")
-                return None
-            else:
-                print(f"❌ Error en Gemini API: {response.status_code}")
-                return None
+                # Payload optimizado para rate limiting
+                payload = {
+                    "contents": [{
+                        "parts": [{
+                            "text": full_prompt
+                        }]
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.7,
+                        "topK": 20,  # Reducido para menos carga
+                        "topP": 0.9,  # Reducido para menos carga
+                        "maxOutputTokens": 512,  # Reducido para respuestas más rápidas
+                        "candidateCount": 1
+                    },
+                    "safetySettings": [
+                        {
+                            "category": "HARM_CATEGORY_HARASSMENT",
+                            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                        },
+                        {
+                            "category": "HARM_CATEGORY_HATE_SPEECH", 
+                            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                        },
+                        {
+                            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                        },
+                        {
+                            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                        }
+                    ]
+                }
                 
-        except requests.exceptions.Timeout:
-            print("⚠️ Timeout con la IA")
-            return None
-        except Exception as e:
-            print(f"❌ Error llamando a la IA: {str(e)}")
-            return None
+                response = requests.post(
+                    self.gemini_url,
+                    headers={
+                        'Content-Type': 'application/json',
+                        'x-goog-api-key': self.api_key,
+                        'User-Agent': 'MathChatBot/1.0'
+                    },
+                    json=payload,
+                    timeout=20  # Timeout aumentado para dar más tiempo
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    if 'candidates' in data and len(data['candidates']) > 0:
+                        candidate = data['candidates'][0]
+                        if 'content' in candidate and 'parts' in candidate['content']:
+                            ai_response = candidate['content']['parts'][0]['text']
+                            return ai_response.strip()
+                    
+                    print("⚠️ Respuesta inesperada de la IA")
+                    return None
+                    
+                elif response.status_code == 429:
+                    print(f"⚠️ Rate limit en intento {attempt + 1}/{max_retries}")
+                    if attempt == max_retries - 1:
+                        print("❌ Rate limit persistente - la IA funcionará intermitentemente")
+                        return None
+                    # Continuar al siguiente intento con backoff
+                    continue
+                    
+                else:
+                    print(f"❌ Error en Gemini API: {response.status_code}")
+                    try:
+                        error_detail = response.json()
+                        print(f"📄 Detalle del error: {error_detail}")
+                    except:
+                        print(f"📄 Response text: {response.text[:200]}")
+                    return None
+                    
+            except requests.exceptions.Timeout:
+                print(f"⚠️ Timeout en intento {attempt + 1}/{max_retries}")
+                if attempt == max_retries - 1:
+                    print("❌ Timeout persistente con la IA")
+                    return None
+                continue
+                
+            except Exception as e:
+                print(f"❌ Error en intento {attempt + 1}/{max_retries}: {str(e)}")
+                if attempt == max_retries - 1:
+                    return None
+                continue
+        
+        return None
     
     def get_fallback_response(self, message):
         """Respuestas de emergencia cuando la IA no está disponible"""
