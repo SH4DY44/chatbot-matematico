@@ -177,46 +177,64 @@ class MathChatBot:
         for part in parts:
             print(f"🔍 Analizando parte: {part}")
             
-            # Buscar patrones algebraicos primero
-            algebraic_patterns = [
-                r'f\(x\)\s*=\s*([^,\.\!?]+)',  # f(x) = 3x+2
-                r'([\-\+]?\d*\.?\d*x(\*\*\d+|\^\d+)?([\+\-]\d+)?)',  # 3x+2, -x^2+1, etc.
-                r'(sin|cos|tan|log|exp|sqrt|abs)\s*\([^)]*\)',  # sin(x), log(x+1), etc.
-                r'x\*\*\d+',  # x**2, x**3, etc.
-                r'x\^\d+',   # x^2, x^3, etc.
-                r'\bx\b',    # x solo
-            ]
+            # PRIORIDAD 1: Buscar funciones trigonométricas y predefinidas PRIMERO
+            trig_patterns = {
+                r'\bsin\s*\(\s*x\s*\)': 'sin',
+                r'\bcos\s*\(\s*x\s*\)': 'cos', 
+                r'\btan\s*\(\s*x\s*\)': 'tan',
+                r'\blog\s*\(\s*x\s*\)': 'log',
+                r'\bexp\s*\(\s*x\s*\)': 'exp',
+                r'\bsqrt\s*\(\s*x\s*\)': 'sqrt',
+                r'\babs\s*\(\s*x\s*\)': 'abs',
+                r'\bsin\b(?!\s*\()': 'sin',  # sin sin paréntesis
+                r'\bcos\b(?!\s*\()': 'cos',  # cos sin paréntesis  
+                r'\btan\b(?!\s*\()': 'tan',  # tan sin paréntesis
+                r'\blog\b(?!\s*\()': 'log',  # log sin paréntesis
+            }
             
             found = False
-            for pattern in algebraic_patterns:
-                match = re.search(pattern, part)
-                if match:
-                    expr = match.group(0).strip()
-                    if 'f(x)' in expr:
-                        expr = expr.split('=')[1].strip()
-                    normalized = self.normalize_function(expr)
-                    print(f"✅ Función algebraica encontrada: {expr} -> {normalized}")
-                    functions.append({
-                        'type': 'algebraic',
-                        'expression': normalized,
-                        'original': expr
-                    })
+            for pattern, func_name in trig_patterns.items():
+                if re.search(pattern, part):
+                    print(f"✅ Función trigonométrica/predefinida encontrada: {func_name}")
+                    functions.append({'type': 'predefined', 'name': func_name})
                     found = True
                     break
             
-            # Si no es algebraica, probar predefinidas
+            # PRIORIDAD 2: Si no es trigonométrica, buscar algebraicas
             if not found:
-                predefs = {
-                    'sin(x)': 'sin', 'cos(x)': 'cos', 'tan(x)': 'tan', 
-                    'log(x)': 'log', 'exp(x)': 'exp', 'sqrt(x)': 'sqrt', 
-                    'abs(x)': 'abs', 'x^2': 'x^2', 'x^3': 'x^3',
-                    'sin': 'sin', 'cos': 'cos', 'tan': 'tan',
-                    'log': 'log', 'exp': 'exp'
+                algebraic_patterns = [
+                    r'f\(x\)\s*=\s*([^,\.\!?]+)',  # f(x) = 3x+2
+                    r'([\-\+]?\d*\.?\d*x(\*\*\d+|\^\d+)?([\+\-]\d+)?)',  # 3x+2, -x^2+1, etc.
+                    r'x\*\*\d+',  # x**2, x**3, etc.
+                    r'x\^\d+',   # x^2, x^3, etc.
+                    r'\bx\b',    # x solo
+                ]
+                
+                for pattern in algebraic_patterns:
+                    match = re.search(pattern, part)
+                    if match:
+                        expr = match.group(0).strip()
+                        if 'f(x)' in expr:
+                            expr = expr.split('=')[1].strip()
+                        normalized = self.normalize_function(expr)
+                        print(f"✅ Función algebraica encontrada: {expr} -> {normalized}")
+                        functions.append({
+                            'type': 'algebraic',
+                            'expression': normalized,
+                            'original': expr
+                        })
+                        found = True
+                        break
+            
+            # PRIORIDAD 3: Patrones simples como último recurso
+            if not found:
+                simple_patterns = {
+                    'x^2': 'x^2', 'x²': 'x^2', 'x^3': 'x^3', 'x³': 'x^3'
                 }
-                for key, val in predefs.items():
+                for key, val in simple_patterns.items():
                     if key in part:
-                        print(f"✅ Función predefinida encontrada: {val}")
-                        functions.append({'type': 'predefined', 'name': val})
+                        print(f"✅ Patrón simple encontrado: {val}")
+                        functions.append({'type': 'algebraic', 'expression': val.replace('^', '**'), 'original': val})
                         found = True
                         break
         
@@ -283,7 +301,43 @@ class MathChatBot:
                 
                 # Determinar el tipo de función
                 if isinstance(func_info, dict):
-                    if func_info['type'] == 'algebraic':
+                    if func_info['type'] == 'predefined':
+                        # Función predefinida - CORREGIDO
+                        func_name = func_info['name']
+                        label = func_name + '(x)'
+                        
+                        print(f"📝 Evaluando función predefinida: {func_name}")
+                        
+                        for x in x_values:
+                            try:
+                                if func_name == 'sin':
+                                    y = math.sin(x)
+                                elif func_name == 'cos':
+                                    y = math.cos(x)
+                                elif func_name == 'tan':
+                                    y = math.tan(x)
+                                    # Limitar tangente para evitar valores extremos
+                                    if abs(y) > 10:
+                                        y = None
+                                elif func_name == 'log':
+                                    y = math.log(x) if x > 0 else None
+                                elif func_name == 'exp':
+                                    y = math.exp(x)
+                                    if y > 1000:
+                                        y = None
+                                elif func_name == 'sqrt':
+                                    y = math.sqrt(x) if x >= 0 else None
+                                elif func_name == 'abs':
+                                    y = abs(x)
+                                else:
+                                    y = None
+                                
+                                y_values.append(y)
+                            except Exception as e:
+                                print(f"⚠️ Error evaluando {func_name}({x}): {e}")
+                                y_values.append(None)
+                        
+                    elif func_info['type'] == 'algebraic':
                         # Función algebraica personalizada
                         func_expression = func_info['expression']
                         label = func_info['original']
@@ -304,60 +358,32 @@ class MathChatBot:
                                     y = None
                                 
                                 y_values.append(y)
-                            except:
-                                y_values.append(None)
-                        
-                    elif func_info['type'] == 'predefined':
-                        # Función predefinida
-                        func_name = func_info['name']
-                        label = func_name + '(x)' if func_name not in ['x^2', 'x^3'] else func_name
-                        
-                        print(f"📝 Evaluando función predefinida: {func_name}")
-                        
-                        for x in x_values:
-                            try:
-                                if func_name == 'sin':
-                                    y = math.sin(x)
-                                elif func_name == 'cos':
-                                    y = math.cos(x)
-                                elif func_name == 'tan':
-                                    y = math.tan(x)
-                                    if abs(y) > 10:
-                                        y = None
-                                elif func_name == 'log':
-                                    y = math.log(x) if x > 0 else None
-                                elif func_name == 'exp':
-                                    y = math.exp(x)
-                                    if y > 1000:
-                                        y = None
-                                elif func_name == 'x^2':
-                                    y = x ** 2
-                                elif func_name == 'x^3':
-                                    y = x ** 3
-                                elif func_name == 'sqrt':
-                                    y = math.sqrt(x) if x >= 0 else None
-                                elif func_name == 'abs':
-                                    y = abs(x)
-                                else:
-                                    y = None
-                                
-                                y_values.append(y)
-                            except:
+                            except Exception as e:
+                                print(f"⚠️ Error evaluando {expression}: {e}")
                                 y_values.append(None)
                 
-                # Crear dataset
-                dataset = {
-                    'label': label,
-                    'data': [{'x': x, 'y': y} for x, y in zip(x_values, y_values) if y is not None],
-                    'borderColor': colors[i % len(colors)],
-                    'backgroundColor': colors[i % len(colors)] + '20',
-                    'tension': 0.4,
-                    'pointRadius': 0,
-                    'fill': False
-                }
+                # Crear dataset solo si tenemos datos válidos
+                valid_data = [{'x': x, 'y': y} for x, y in zip(x_values, y_values) if y is not None]
                 
-                datasets.append(dataset)
-                print(f"✅ Dataset creado para {label} con {len(dataset['data'])} puntos")
+                if len(valid_data) > 0:
+                    dataset = {
+                        'label': label,
+                        'data': valid_data,
+                        'borderColor': colors[i % len(colors)],
+                        'backgroundColor': colors[i % len(colors)] + '20',
+                        'tension': 0.4,
+                        'pointRadius': 0,
+                        'fill': False
+                    }
+                    
+                    datasets.append(dataset)
+                    print(f"✅ Dataset creado para {label} con {len(valid_data)} puntos")
+                else:
+                    print(f"❌ No se generaron datos válidos para {label}")
+            
+            if len(datasets) == 0:
+                print(f"❌ No se pudo generar ningún dataset")
+                return None
             
             chart_data = {
                 'type': 'line',
@@ -394,7 +420,7 @@ class MathChatBot:
                     'plugins': {
                         'title': {
                             'display': True,
-                            'text': f"Gráfica de {', '.join([f['original'] if isinstance(f, dict) and 'original' in f else (f['name'] if isinstance(f, dict) else f) for f in chart_info['functions']])}"
+                            'text': f"Gráfica de {', '.join([f['name'] if f['type'] == 'predefined' else f['original'] for f in chart_info['functions']])}"
                         },
                         'legend': {
                             'display': len(datasets) > 1
@@ -408,6 +434,8 @@ class MathChatBot:
             
         except Exception as e:
             print(f"❌ Error generando datos de gráfica: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def is_mathematical_expression(self, message):
