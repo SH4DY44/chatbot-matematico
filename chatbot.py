@@ -162,6 +162,8 @@ class MathChatBot:
         message = self.natural_language_to_expression(message)
         message_lower = message.lower()
         
+        print(f"📊 Parseando solicitud de gráfica: {message}")
+        
         # Separar múltiples funciones por coma, 'y', 'vs', 'versus'
         split_patterns = [',', ' y ', ' vs ', ' versus ', ' contra ']
         for pat in split_patterns:
@@ -173,20 +175,27 @@ class MathChatBot:
         
         functions = []
         for part in parts:
-            # Buscar patrones algebraicos
+            print(f"🔍 Analizando parte: {part}")
+            
+            # Buscar patrones algebraicos primero
             algebraic_patterns = [
                 r'f\(x\)\s*=\s*([^,\.\!?]+)',  # f(x) = 3x+2
-                r'([\-\+]?\d*\.?\d*x(\^\d+)?([\+\-]\d+)?)+',  # 3x+2, -x^2+1, etc.
-                r'(sin|cos|tan|log|exp|sqrt|abs)\s*\(.*?\)',  # sin(x), log(x+1), etc.
-                r'x\^\d+',  # x^2, x^3, etc.
-                r'x',  # x solo
+                r'([\-\+]?\d*\.?\d*x(\*\*\d+|\^\d+)?([\+\-]\d+)?)',  # 3x+2, -x^2+1, etc.
+                r'(sin|cos|tan|log|exp|sqrt|abs)\s*\([^)]*\)',  # sin(x), log(x+1), etc.
+                r'x\*\*\d+',  # x**2, x**3, etc.
+                r'x\^\d+',   # x^2, x^3, etc.
+                r'\bx\b',    # x solo
             ]
+            
             found = False
             for pattern in algebraic_patterns:
                 match = re.search(pattern, part)
                 if match:
                     expr = match.group(0).strip()
+                    if 'f(x)' in expr:
+                        expr = expr.split('=')[1].strip()
                     normalized = self.normalize_function(expr)
+                    print(f"✅ Función algebraica encontrada: {expr} -> {normalized}")
                     functions.append({
                         'type': 'algebraic',
                         'expression': normalized,
@@ -194,31 +203,42 @@ class MathChatBot:
                     })
                     found = True
                     break
+            
             # Si no es algebraica, probar predefinidas
             if not found:
                 predefs = {
-                    'sin': 'sin', 'cos': 'cos', 'tan': 'tan', 'log': 'log', 'exp': 'exp',
-                    'sqrt': 'sqrt', 'abs': 'abs', 'x^2': 'x^2', 'x^3': 'x^3'
+                    'sin(x)': 'sin', 'cos(x)': 'cos', 'tan(x)': 'tan', 
+                    'log(x)': 'log', 'exp(x)': 'exp', 'sqrt(x)': 'sqrt', 
+                    'abs(x)': 'abs', 'x^2': 'x^2', 'x^3': 'x^3',
+                    'sin': 'sin', 'cos': 'cos', 'tan': 'tan',
+                    'log': 'log', 'exp': 'exp'
                 }
                 for key, val in predefs.items():
                     if key in part:
+                        print(f"✅ Función predefinida encontrada: {val}")
                         functions.append({'type': 'predefined', 'name': val})
                         found = True
                         break
+        
         # Rango
         range_match = re.search(r'de\s+(-?\d+)\s+a\s+(-?\d+)', message_lower)
         if range_match:
             x_range = [int(range_match.group(1)), int(range_match.group(2))]
         else:
             x_range = [-10, 10]
+        
         # Comparación
         is_comparison = len(functions) > 1
-        return {
+        
+        result = {
             'functions': functions,
             'range': x_range,
             'is_comparison': is_comparison,
             'type': 'comparison' if is_comparison else 'single'
         }
+        
+        print(f"📋 Resultado del parsing: {result}")
+        return result
     
     def is_algebraic_function(self, function_str):
         """Verificar si una cadena es una función algebraica válida"""
@@ -236,6 +256,8 @@ class MathChatBot:
     def generate_chart_data(self, chart_info):
         """Generar datos para la gráfica"""
         try:
+            print(f"📊 Generando datos de gráfica para: {chart_info}")
+            
             x_min, x_max = chart_info['range']
             x_values = []
             datasets = []
@@ -255,7 +277,9 @@ class MathChatBot:
             
             # Generar datos para cada función
             for i, func_info in enumerate(chart_info['functions']):
+                print(f"🔧 Procesando función {i+1}: {func_info}")
                 y_values = []
+                label = "función"
                 
                 # Determinar el tipo de función
                 if isinstance(func_info, dict):
@@ -264,10 +288,15 @@ class MathChatBot:
                         func_expression = func_info['expression']
                         label = func_info['original']
                         
+                        print(f"📝 Evaluando expresión algebraica: {func_expression}")
+                        
                         for x in x_values:
                             try:
                                 # Reemplazar x en la expresión
                                 expression = func_expression.replace('x', f'({x})')
+                                # Añadir math. a las funciones
+                                expression = re.sub(r'\b(sin|cos|tan|log|exp|sqrt|abs)\b', r'math.\1', expression)
+                                
                                 y = eval(expression, {"__builtins__": {}, "math": math})
                                 
                                 # Limitar valores extremos
@@ -281,7 +310,9 @@ class MathChatBot:
                     elif func_info['type'] == 'predefined':
                         # Función predefinida
                         func_name = func_info['name']
-                        label = func_name + '(x)'
+                        label = func_name + '(x)' if func_name not in ['x^2', 'x^3'] else func_name
+                        
+                        print(f"📝 Evaluando función predefinida: {func_name}")
                         
                         for x in x_values:
                             try:
@@ -326,8 +357,9 @@ class MathChatBot:
                 }
                 
                 datasets.append(dataset)
+                print(f"✅ Dataset creado para {label} con {len(dataset['data'])} puntos")
             
-            return {
+            chart_data = {
                 'type': 'line',
                 'data': {
                     'datasets': datasets
@@ -371,8 +403,11 @@ class MathChatBot:
                 }
             }
             
+            print(f"✅ Datos de gráfica generados exitosamente")
+            return chart_data
+            
         except Exception as e:
-            print(f"Error generando datos de gráfica: {str(e)}")
+            print(f"❌ Error generando datos de gráfica: {str(e)}")
             return None
     
     def is_mathematical_expression(self, message):
@@ -718,8 +753,15 @@ class MathChatBot:
                         if len(self.conversation_history) > 5:
                             self.conversation_history.pop(0)
                         
+                        print("✅ Enviando datos de gráfica al frontend")
                         return {
-                            'response': "Lo siento, hubo un problema generando la gráfica. ¿Podrías intentar con una función más simple?",
+                            'response': response_text,
+                            'type': 'chart',
+                            'chart_data': chart_data
+                        }
+                    else:
+                        return {
+                            'response': "Hubo un problema generando la gráfica. ¿Podrías intentar con una función más simple como 'grafica sin(x)' o 'grafica x^2'?",
                             'type': 'text'
                         }
                 else:

@@ -24,6 +24,7 @@ class MathChatBot {
         this.examplesVisible = false;
         this.chartsVisible = false;
         this.currentCategory = 'basico';
+        this.welcomePanelHidden = false; // Nuevo: para rastrear si ya se ocultó
         
         // Contador para gráficas únicas
         this.chartCount = 0;
@@ -95,9 +96,14 @@ class MathChatBot {
             }
         });
         
-        // Sugerencias automáticas mientras escribe
+        // NUEVO: Ocultar panel de bienvenida cuando usuario empiece a escribir
         this.messageInput.addEventListener('input', (e) => {
             this.showSuggestions(e.target.value);
+            
+            // Si hay texto y el panel de bienvenida aún está visible, ocultarlo
+            if (e.target.value.trim().length > 0 && !this.welcomePanelHidden) {
+                this.hideWelcomePanelSmooth();
+            }
         });
         
         // Ocultar sugerencias al hacer click fuera
@@ -120,6 +126,20 @@ class MathChatBot {
     
     // === MANEJO DE PANELES ===
     
+    // NUEVO: Ocultar panel de bienvenida con transición suave
+    hideWelcomePanelSmooth() {
+        if (this.welcomePanelHidden) return;
+        
+        this.welcomePanelHidden = true;
+        this.welcomePanel.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+        this.welcomePanel.style.opacity = '0';
+        this.welcomePanel.style.transform = 'translateY(-20px)';
+        
+        setTimeout(() => {
+            this.welcomePanel.style.display = 'none';
+        }, 500);
+    }
+    
     selectCategory(type) {
         this.hideWelcomePanel();
         
@@ -138,6 +158,7 @@ class MathChatBot {
     
     hideWelcomePanel() {
         this.welcomePanel.style.display = 'none';
+        this.welcomePanelHidden = true;
     }
     
     showCategories() {
@@ -239,6 +260,9 @@ class MathChatBot {
         // Mover cursor después del símbolo insertado
         this.messageInput.setSelectionRange(cursorPos + symbol.length, cursorPos + symbol.length);
         this.messageInput.focus();
+        
+        // Trigger input event para activar hideWelcomePanel si es necesario
+        this.messageInput.dispatchEvent(new Event('input'));
     }
     
     insertFunction(func) {
@@ -252,6 +276,9 @@ class MathChatBot {
         const newCursorPos = cursorPos + func.length - 1;
         this.messageInput.setSelectionRange(newCursorPos, newCursorPos);
         this.messageInput.focus();
+        
+        // Trigger input event
+        this.messageInput.dispatchEvent(new Event('input'));
     }
     
     clearInput() {
@@ -295,6 +322,9 @@ class MathChatBot {
         this.messageInput.value = suggestion;
         this.hideSuggestions();
         this.messageInput.focus();
+        
+        // Trigger input event
+        this.messageInput.dispatchEvent(new Event('input'));
     }
     
     // === AYUDA ===
@@ -332,10 +362,12 @@ class MathChatBot {
         this.addMessage(helpMessage, 'bot');
     }
     
-    // === GRÁFICAS ===
+    // === GRÁFICAS MEJORADAS ===
     
     createChart(chartData) {
         this.chartCount++;
+        
+        console.log('📊 Creando gráfica con datos:', chartData);
         
         // Crear contenedor para la gráfica
         const chartContainer = document.createElement('div');
@@ -353,9 +385,10 @@ class MathChatBot {
         
         try {
             new Chart(ctx, chartData);
+            console.log('✅ Gráfica creada exitosamente');
         } catch (error) {
-            console.error('Error creando gráfica:', error);
-            chartContainer.innerHTML = '<div class="chart-error">Error creando la gráfica</div>';
+            console.error('❌ Error creando gráfica:', error);
+            chartContainer.innerHTML = '<div class="chart-error">Error creando la gráfica: ' + error.message + '</div>';
         }
     }
     
@@ -387,7 +420,7 @@ class MathChatBot {
         this.status.className = `status ${className}`;
     }
     
-    // === ENVÍO DE MENSAJES ===
+    // === ENVÍO DE MENSAJES MEJORADO ===
     
     async sendMessage() {
         const message = this.messageInput.value.trim();
@@ -400,6 +433,11 @@ class MathChatBot {
         // Ocultar paneles y sugerencias
         this.hideAllPanels();
         this.hideSuggestions();
+        
+        // Ocultar panel de bienvenida si aún está visible
+        if (!this.welcomePanelHidden) {
+            this.hideWelcomePanelSmooth();
+        }
         
         // Deshabilitar controles
         this.setInputsEnabled(false);
@@ -414,6 +452,8 @@ class MathChatBot {
         this.showTypingIndicator();
         
         try {
+            console.log('📤 Enviando mensaje:', message);
+            
             const response = await fetch(this.apiUrl, {
                 method: 'POST',
                 headers: {
@@ -427,6 +467,7 @@ class MathChatBot {
             
             if (response.ok) {
                 const data = await response.json();
+                console.log('📥 Respuesta recibida:', data);
                 
                 // Simular delay natural
                 await this.delay(300);
@@ -436,8 +477,11 @@ class MathChatBot {
                 
                 // Si hay datos de gráfica, mostrarla
                 if (data.chart_data) {
+                    console.log('📊 Datos de gráfica detectados, creando visualización...');
                     await this.delay(500); // Pequeña pausa antes de la gráfica
                     this.createChart(data.chart_data);
+                } else {
+                    console.log('ℹ️ No se recibieron datos de gráfica');
                 }
                 
                 this.updateStatus('Conectado', 'connected');
@@ -573,6 +617,10 @@ function showCategories() {
 function sendExample(example) {
     chatBot.messageInput.value = example;
     chatBot.hideAllPanels();
+    
+    // Trigger input event para ocultar welcome panel si es necesario
+    chatBot.messageInput.dispatchEvent(new Event('input'));
+    
     chatBot.sendMessage();
 }
 
