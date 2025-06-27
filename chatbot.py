@@ -23,7 +23,7 @@ class MathChatBot:
         
         # Rate limiting para la IA
         self.last_api_call = 0
-        self.min_interval = 1.5  # 1.5 segundos entre llamadas a la IA
+        self.min_interval = 4.0  # 4 segundos entre llamadas a la IA
         
         # API Key de Google Gemini - SOLO desde variable de entorno
         self.api_key = os.getenv('GEMINI_API_KEY')
@@ -61,27 +61,30 @@ class MathChatBot:
         
         print("🧠 ChatBot con IA matemática y gráficas inicializado")
         
-        # Probar conexión con IA solo si está disponible
-        if self.ai_available:
+        # CAMBIO: Solo probar conexión si no estamos en producción
+        if self.api_key and os.getenv('FLASK_ENV') != 'production':
             self.test_ai_connection()
+        elif self.api_key:
+            print("🧠 IA configurada - conexión se probará en primer uso")
     
     def test_ai_connection(self):
         """Probar si la conexión con Google Gemini funciona"""
-        if not self.ai_available:
+        if not self.api_key:
             return False
-            
+        
+        # CAMBIO: No marcar como no disponible si es solo rate limit
         try:
             test_response = self.get_ai_response_sync("Responde solo: OK")
             if test_response and "ok" in test_response.lower():
                 print("✅ Conexión con IA establecida correctamente")
                 return True
             else:
-                print("⚠️ Problema con la IA, funcionando en modo fallback")
-                self.ai_available = False
+                # CAMBIO: No desactivar la IA, solo reportar que el test falló
+                print("⚠️ Test de IA falló - se intentará en uso real")
                 return False
         except Exception as e:
-            print(f"⚠️ Error probando IA: {str(e)}")
-            self.ai_available = False
+            print(f"⚠️ Error probando IA - se intentará en uso real: {str(e)}")
+            # CAMBIO: NO poner self.ai_available = False aquí
             return False
     
     def is_chart_request(self, message):
@@ -541,11 +544,12 @@ class MathChatBot:
         return message.strip()
     
     def get_ai_response_sync(self, message):
-        """Obtener respuesta de la IA de forma síncrona con rate limiting mejorado"""
-        if not self.ai_available:
+        """Obtener respuesta de la IA - SIEMPRE intentar si hay API key"""
+        # CAMBIO: No verificar ai_available, solo verificar que hay API key
+        if not self.api_key:
             return None
         
-        # === RATE LIMITING INTELIGENTE ===
+        # Rate limiting conservador
         current_time = time.time()
         time_since_last = current_time - self.last_api_call
         
@@ -554,133 +558,50 @@ class MathChatBot:
             print(f"⏳ Rate limiting: esperando {sleep_time:.1f}s")
             time.sleep(sleep_time)
         
-        # === RETRY LOGIC CON BACKOFF EXPONENCIAL ===
-        max_retries = 3
-        base_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                self.last_api_call = time.time()
-                
-                # Si es un retry, agregar delay adicional
-                if attempt > 0:
-                    retry_delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                    print(f"🔄 Reintento {attempt + 1}/{max_retries} después de {retry_delay:.1f}s")
-                    time.sleep(retry_delay)
-                    self.last_api_call = time.time()  # Actualizar después del delay
-                
-                # Crear prompt especializado en matemáticas
-                system_prompt = """Eres un profesor de matemáticas experto, amigable y conversacional. Tu trabajo es:
-
-1. Responder preguntas matemáticas con explicaciones claras y educativas
-2. Explicar conceptos matemáticos de forma comprensible y profunda
-3. Ayudar con problemas paso a paso cuando sea necesario
-4. Ser natural y conversacional, como un profesor universitario que realmente se preocupa por que el estudiante entienda
-5. Dar contexto histórico, aplicaciones prácticas o curiosidades cuando sea relevante
-6. No usar demasiados emojis, mantener un tono profesional pero amigable
-
-Si el usuario hace una pregunta matemática, explica tanto el "qué" como el "por qué". 
-Si pregunta sobre conceptos, da explicaciones profundas pero accesibles.
-Si es una conversación general relacionada con matemáticas, mantén el contexto educativo."""
-
-                # Construir contexto de conversación si existe
-                conversation_context = ""
-                if self.conversation_history:
-                    recent_messages = self.conversation_history[-3:]  # Últimos 3 intercambios
-                    conversation_context = "\n\nContexto de conversación previa:\n"
-                    for user_msg, bot_response in recent_messages:
-                        conversation_context += f"Usuario: {user_msg}\nAsistente: {bot_response[:150]}...\n"
-                
-                full_prompt = f"{system_prompt}\n\nPregunta actual del usuario: {message}{conversation_context}"
-                
-                # Payload optimizado para rate limiting
-                payload = {
-                    "contents": [{
-                        "parts": [{
-                            "text": full_prompt
-                        }]
-                    }],
-                    "generationConfig": {
-                        "temperature": 0.7,
-                        "topK": 20,  # Reducido para menos carga
-                        "topP": 0.9,  # Reducido para menos carga
-                        "maxOutputTokens": 512,  # Reducido para respuestas más rápidas
-                        "candidateCount": 1
-                    },
-                    "safetySettings": [
-                        {
-                            "category": "HARM_CATEGORY_HARASSMENT",
-                            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                        },
-                        {
-                            "category": "HARM_CATEGORY_HATE_SPEECH", 
-                            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                        },
-                        {
-                            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                        },
-                        {
-                            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                        }
-                    ]
+        try:
+            self.last_api_call = time.time()
+            
+            # Payload simplificado
+            payload = {
+                "contents": [{
+                    "parts": [{
+                        "text": f"Como profesor de matemáticas, responde brevemente: {message}"
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 400
                 }
+            }
+            
+            response = requests.post(
+                self.gemini_url,
+                headers={
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': self.api_key
+                },
+                json=payload,
+                timeout=20
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'candidates' in data and len(data['candidates']) > 0:
+                    candidate = data['candidates'][0]
+                    if 'content' in candidate and 'parts' in candidate['content']:
+                        ai_response = candidate['content']['parts'][0]['text']
+                        return ai_response.strip()
+            
+            elif response.status_code == 429:
+                print("⚠️ Rate limit temporal - reintentando más tarde")
+                return None
+            else:
+                print(f"❌ Error en Gemini API: {response.status_code}")
+                return None
                 
-                response = requests.post(
-                    self.gemini_url,
-                    headers={
-                        'Content-Type': 'application/json',
-                        'x-goog-api-key': self.api_key,
-                        'User-Agent': 'MathChatBot/1.0'
-                    },
-                    json=payload,
-                    timeout=20  # Timeout aumentado para dar más tiempo
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    
-                    if 'candidates' in data and len(data['candidates']) > 0:
-                        candidate = data['candidates'][0]
-                        if 'content' in candidate and 'parts' in candidate['content']:
-                            ai_response = candidate['content']['parts'][0]['text']
-                            return ai_response.strip()
-                    
-                    print("⚠️ Respuesta inesperada de la IA")
-                    return None
-                    
-                elif response.status_code == 429:
-                    print(f"⚠️ Rate limit en intento {attempt + 1}/{max_retries}")
-                    if attempt == max_retries - 1:
-                        print("❌ Rate limit persistente - la IA funcionará intermitentemente")
-                        return None
-                    # Continuar al siguiente intento con backoff
-                    continue
-                    
-                else:
-                    print(f"❌ Error en Gemini API: {response.status_code}")
-                    try:
-                        error_detail = response.json()
-                        print(f"📄 Detalle del error: {error_detail}")
-                    except:
-                        print(f"📄 Response text: {response.text[:200]}")
-                    return None
-                    
-            except requests.exceptions.Timeout:
-                print(f"⚠️ Timeout en intento {attempt + 1}/{max_retries}")
-                if attempt == max_retries - 1:
-                    print("❌ Timeout persistente con la IA")
-                    return None
-                continue
-                
-            except Exception as e:
-                print(f"❌ Error en intento {attempt + 1}/{max_retries}: {str(e)}")
-                if attempt == max_retries - 1:
-                    return None
-                continue
-        
-        return None
+        except Exception as e:
+            print(f"❌ Error llamando a la IA: {str(e)}")
+            return None
     
     def get_fallback_response(self, message):
         """Respuestas de emergencia cuando la IA no está disponible"""
@@ -753,7 +674,8 @@ Si es una conversación general relacionada con matemáticas, mantén el context
                             else:
                                 function_names.append(f)
                         
-                        if self.ai_available:
+                        # CAMBIO: Siempre intentar IA si hay API key
+                        if self.api_key:  # En lugar de self.ai_available
                             ai_explanation = self.get_ai_response_sync(
                                 f"El usuario pidió graficar {', '.join(function_names)}. Explica brevemente estas funciones matemáticas y sus características principales."
                             )
@@ -797,8 +719,8 @@ Si es una conversación general relacionada con matemáticas, mantén el context
                     
                     print(f"✅ Resultado calculado: {formatted_result}")
                     
-                    # Usar IA para enriquecer la respuesta con explicación si está disponible
-                    if self.ai_available:
+                    # CAMBIO: Intentar IA si hay API key
+                    if self.api_key:  # En lugar de self.ai_available
                         ai_explanation = self.get_ai_response_sync(
                             f"El usuario calculó '{expression}' y obtuve como resultado {formatted_result}. Explica brevemente esta operación matemática y proporciona contexto educativo relevante. Sé conciso pero informativo."
                         )
@@ -828,7 +750,8 @@ Si es una conversación general relacionada con matemáticas, mantén el context
                     pass
             
             # PASO 3: Usar IA para respuesta conversacional
-            if self.ai_available:
+            # CAMBIO: Verificar API key en lugar de ai_available
+            if self.api_key:  
                 print("🧠 Consultando IA...")
                 ai_response = self.get_ai_response_sync(message)
                 
@@ -842,9 +765,11 @@ Si es una conversación general relacionada con matemáticas, mantén el context
                         'response': ai_response,
                         'type': 'conversation'
                     }
+                else:
+                    print("⚠️ IA no respondió, usando fallback")
             
             # PASO 4: Usar respuestas de fallback
-            print("⚠️ IA no disponible, usando fallback")
+            print("⚠️ Usando fallback")
             fallback_response = self.get_fallback_response(message)
             return {
                 'response': fallback_response,
