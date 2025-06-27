@@ -21,18 +21,17 @@ class MathChatBot:
         self.last_result = None
         self.variables = {}
         
-        # Rate limiting para la IA
+        # Rate limiting ULTRA conservador - 15 segundos entre llamadas
         self.last_api_call = 0
-        self.min_interval = 4.0  # 4 segundos entre llamadas a la IA
+        self.min_interval = 15.0  # 15 segundos para respetar límites de Google
         
         # API Key de Google Gemini - SOLO desde variable de entorno
         self.api_key = os.getenv('GEMINI_API_KEY')
         if not self.api_key:
             print("⚠️ ADVERTENCIA: GEMINI_API_KEY no configurada. IA funcionará en modo fallback.")
-            self.ai_available = False
         else:
-            self.ai_available = True
             self.gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+            print("🧠 IA configurada y lista para usar")
         
         # Operadores seguros para evaluación
         self.operators = {
@@ -60,32 +59,7 @@ class MathChatBot:
         }
         
         print("🧠 ChatBot con IA matemática y gráficas inicializado")
-        
-        # CAMBIO: Solo probar conexión si no estamos en producción
-        if self.api_key and os.getenv('FLASK_ENV') != 'production':
-            self.test_ai_connection()
-        elif self.api_key:
-            print("🧠 IA configurada - conexión se probará en primer uso")
-    
-    def test_ai_connection(self):
-        """Probar si la conexión con Google Gemini funciona"""
-        if not self.api_key:
-            return False
-        
-        # CAMBIO: No marcar como no disponible si es solo rate limit
-        try:
-            test_response = self.get_ai_response_sync("Responde solo: OK")
-            if test_response and "ok" in test_response.lower():
-                print("✅ Conexión con IA establecida correctamente")
-                return True
-            else:
-                # CAMBIO: No desactivar la IA, solo reportar que el test falló
-                print("⚠️ Test de IA falló - se intentará en uso real")
-                return False
-        except Exception as e:
-            print(f"⚠️ Error probando IA - se intentará en uso real: {str(e)}")
-            # CAMBIO: NO poner self.ai_available = False aquí
-            return False
+        print("✅ ChatBot completo listo!")
     
     def is_chart_request(self, message):
         """Detectar si el usuario quiere una gráfica"""
@@ -156,13 +130,11 @@ class MathChatBot:
         return function_str
     
     def parse_chart_request(self, message):
-        """Analizar qué tipo de gráfica quiere el usuario - VERSIÓN MEJORADA"""
+        """Analizar qué tipo de gráfica quiere el usuario"""
         message_lower = message.lower()
         
         # Detectar funciones específicas
         functions = []
-        
-        # === PARSER PARA FUNCIONES ALGEBRAICAS GENERALES ===
         
         # Buscar patrones de funciones algebraicas (3x+2, 2x-1, etc.)
         algebraic_patterns = [
@@ -191,8 +163,7 @@ class MathChatBot:
                     function_found = True
                     break
         
-        # === FUNCIONES PREDEFINIDAS (como antes) ===
-        
+        # Funciones predefinidas si no se encontró algebraica
         if not function_found:
             # Funciones trigonométricas
             if 'sin' in message_lower and 'asin' not in message_lower:
@@ -237,12 +208,6 @@ class MathChatBot:
     
     def is_algebraic_function(self, function_str):
         """Verificar si una cadena es una función algebraica válida"""
-        # Patrones para funciones algebraicas válidas
-        valid_patterns = [
-            r'^[\d\.\s]*x[\d\.\s\+\-\*\/\^\(\)]*$',  # Contiene x y operadores matemáticos
-            r'^\d+[\+\-]\d+$',                       # Funciones constantes como 5+2
-        ]
-        
         # Debe contener 'x' para ser una función
         if 'x' not in function_str:
             return False
@@ -255,7 +220,7 @@ class MathChatBot:
         return True
     
     def generate_chart_data(self, chart_info):
-        """Generar datos para la gráfica - VERSIÓN MEJORADA"""
+        """Generar datos para la gráfica"""
         try:
             x_min, x_max = chart_info['range']
             x_values = []
@@ -304,7 +269,6 @@ class MathChatBot:
                         func_name = func_info['name']
                         label = func_name + '(x)'
                         
-                        # Lógica existente para funciones predefinidas
                         for x in x_values:
                             try:
                                 if func_name == 'sin':
@@ -335,42 +299,6 @@ class MathChatBot:
                                 y_values.append(y)
                             except:
                                 y_values.append(None)
-                else:
-                    # Compatibilidad con formato anterior (string)
-                    func = func_info
-                    label = func + '(x)' if func not in ['x^2', 'x^3'] else func
-                    
-                    # Lógica existente para funciones string
-                    for x in x_values:
-                        try:
-                            if func == 'sin':
-                                y = math.sin(x)
-                            elif func == 'cos':
-                                y = math.cos(x)
-                            elif func == 'tan':
-                                y = math.tan(x)
-                                if abs(y) > 10:
-                                    y = None
-                            elif func == 'log':
-                                y = math.log(x) if x > 0 else None
-                            elif func == 'exp':
-                                y = math.exp(x)
-                                if y > 1000:
-                                    y = None
-                            elif func == 'x^2':
-                                y = x ** 2
-                            elif func == 'x^3':
-                                y = x ** 3
-                            elif func == 'sqrt':
-                                y = math.sqrt(x) if x >= 0 else None
-                            elif func == 'abs':
-                                y = abs(x)
-                            else:
-                                y = None
-                            
-                            y_values.append(y)
-                        except:
-                            y_values.append(None)
                 
                 # Crear dataset
                 dataset = {
@@ -544,33 +472,32 @@ class MathChatBot:
         return message.strip()
     
     def get_ai_response_sync(self, message):
-        """Obtener respuesta de la IA - SIEMPRE intentar si hay API key"""
-        # CAMBIO: No verificar ai_available, solo verificar que hay API key
+        """Obtener respuesta de la IA con rate limiting ULTRA conservador"""
         if not self.api_key:
             return None
         
-        # Rate limiting conservador
+        # Rate limiting de 15 segundos mínimo
         current_time = time.time()
         time_since_last = current_time - self.last_api_call
         
         if time_since_last < self.min_interval:
             sleep_time = self.min_interval - time_since_last
-            print(f"⏳ Rate limiting: esperando {sleep_time:.1f}s")
+            print(f"⏳ Esperando {sleep_time:.0f}s para respetar rate limit de Google")
             time.sleep(sleep_time)
         
         try:
             self.last_api_call = time.time()
             
-            # Payload simplificado
+            # Payload MÍNIMO para reducir carga
             payload = {
                 "contents": [{
                     "parts": [{
-                        "text": f"Como profesor de matemáticas, responde brevemente: {message}"
+                        "text": message[:200]  # Limitar a 200 caracteres
                     }]
                 }],
                 "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": 400
+                    "temperature": 0.5,
+                    "maxOutputTokens": 150  # Respuestas muy cortas
                 }
             }
             
@@ -581,7 +508,7 @@ class MathChatBot:
                     'x-goog-api-key': self.api_key
                 },
                 json=payload,
-                timeout=20
+                timeout=30
             )
             
             if response.status_code == 200:
@@ -590,17 +517,18 @@ class MathChatBot:
                     candidate = data['candidates'][0]
                     if 'content' in candidate and 'parts' in candidate['content']:
                         ai_response = candidate['content']['parts'][0]['text']
+                        print("✅ IA respondió exitosamente")
                         return ai_response.strip()
             
             elif response.status_code == 429:
-                print("⚠️ Rate limit temporal - reintentando más tarde")
+                print("⚠️ Rate limit - Google necesita más tiempo entre requests")
                 return None
             else:
-                print(f"❌ Error en Gemini API: {response.status_code}")
+                print(f"❌ Error {response.status_code}: {response.text[:100]}")
                 return None
                 
         except Exception as e:
-            print(f"❌ Error llamando a la IA: {str(e)}")
+            print(f"❌ Error: {str(e)}")
             return None
     
     def get_fallback_response(self, message):
@@ -663,7 +591,6 @@ class MathChatBot:
                     chart_data = self.generate_chart_data(chart_info)
                     
                     if chart_data:
-                        # Usar IA para explicar la gráfica si está disponible
                         function_names = []
                         for f in chart_info['functions']:
                             if isinstance(f, dict):
@@ -674,14 +601,7 @@ class MathChatBot:
                             else:
                                 function_names.append(f)
                         
-                        # CAMBIO: Siempre intentar IA si hay API key
-                        if self.api_key:  # En lugar de self.ai_available
-                            ai_explanation = self.get_ai_response_sync(
-                                f"El usuario pidió graficar {', '.join(function_names)}. Explica brevemente estas funciones matemáticas y sus características principales."
-                            )
-                            response_text = ai_explanation if ai_explanation else f"Aquí tienes la gráfica de {', '.join(function_names)}."
-                        else:
-                            response_text = f"Aquí tienes la gráfica de {', '.join(function_names)}. (IA no disponible para explicación detallada)"
+                        response_text = f"Aquí tienes la gráfica de {', '.join(function_names)}."
                         
                         # Guardar en historial
                         self.conversation_history.append((message, response_text))
@@ -719,20 +639,7 @@ class MathChatBot:
                     
                     print(f"✅ Resultado calculado: {formatted_result}")
                     
-                    # CAMBIO: Intentar IA si hay API key
-                    if self.api_key:  # En lugar de self.ai_available
-                        ai_explanation = self.get_ai_response_sync(
-                            f"El usuario calculó '{expression}' y obtuve como resultado {formatted_result}. Explica brevemente esta operación matemática y proporciona contexto educativo relevante. Sé conciso pero informativo."
-                        )
-                        
-                        if ai_explanation:
-                            response_text = f"**Resultado:** {formatted_result}\n\n{ai_explanation}"
-                        else:
-                            # Explicación básica si la IA falla
-                            response_text = f"**Resultado:** {formatted_result}\n\nEste es el resultado de calcular: {expression}"
-                    else:
-                        # Explicación básica si IA no está disponible
-                        response_text = f"**Resultado:** {formatted_result}\n\nEste es el resultado de calcular: {expression} (IA no disponible para explicación detallada)"
+                    response_text = f"**Resultado:** {formatted_result}"
                     
                     # Guardar en historial
                     self.conversation_history.append((message, response_text))
@@ -746,13 +653,22 @@ class MathChatBot:
                     
                 except Exception as e:
                     print(f"⚠️ Error en cálculo: {str(e)}")
-                    # Si falla el cálculo, dejar que la IA maneje todo
+                    # Si falla el cálculo, continuar a IA
                     pass
             
-            # PASO 3: Usar IA para respuesta conversacional
-            # CAMBIO: Verificar API key en lugar de ai_available
-            if self.api_key:  
+            # PASO 3: IA Conversacional CON INFORMACIÓN DE TIMING
+            if self.api_key:
                 print("🧠 Consultando IA...")
+                
+                # Verificar si hace poco se usó la IA
+                time_since_last = time.time() - self.last_api_call
+                if time_since_last < self.min_interval:
+                    remaining = self.min_interval - time_since_last
+                    return {
+                        'response': f"🤖 IA disponible en {remaining:.0f} segundos debido a límites de Google. Mientras tanto, puedo ayudarte con cálculos matemáticos (ej: 2+2) o gráficas (ej: grafica sin(x)).",
+                        'type': 'rate_limit_info'
+                    }
+                
                 ai_response = self.get_ai_response_sync(message)
                 
                 if ai_response:
@@ -766,9 +682,12 @@ class MathChatBot:
                         'type': 'conversation'
                     }
                 else:
-                    print("⚠️ IA no respondió, usando fallback")
+                    return {
+                        'response': "🤖 IA temporalmente limitada por Google. Puedo ayudarte con cálculos (2+2) o gráficas (grafica sin(x)).",
+                        'type': 'ai_limited'
+                    }
             
-            # PASO 4: Usar respuestas de fallback
+            # PASO 4: Fallback cuando no hay API key
             print("⚠️ Usando fallback")
             fallback_response = self.get_fallback_response(message)
             return {
@@ -798,5 +717,5 @@ class MathChatBot:
             'conversation_history': len(self.conversation_history),
             'last_result': self.last_result,
             'variables_defined': len(self.variables),
-            'ai_available': self.ai_available
+            'ai_available': bool(self.api_key)
         }
