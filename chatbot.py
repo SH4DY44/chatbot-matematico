@@ -21,17 +21,23 @@ class MathChatBot:
         self.last_result = None
         self.variables = {}
         
-        # Rate limiting ULTRA conservador - 15 segundos entre llamadas
+        # Rate limiting más relajado para Groq - 2 segundos
         self.last_api_call = 0
-        self.min_interval = 15.0  # 15 segundos para respetar límites de Google
+        self.min_interval = 2.0  # Groq es mucho más permisivo
         
-        # API Key de Google Gemini - SOLO desde variable de entorno
-        self.api_key = os.getenv('GEMINI_API_KEY')
+        # API Key - Ahora soporta múltiples proveedores
+        self.api_key = os.getenv('GROQ_API_KEY') or os.getenv('GEMINI_API_KEY')
+        self.api_provider = 'groq' if os.getenv('GROQ_API_KEY') else 'gemini'
+        
         if not self.api_key:
-            print("⚠️ ADVERTENCIA: GEMINI_API_KEY no configurada. IA funcionará en modo fallback.")
+            print("⚠️ ADVERTENCIA: No se encontró GROQ_API_KEY ni GEMINI_API_KEY.")
         else:
-            self.gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
-            print("🧠 IA configurada y lista para usar")
+            if self.api_provider == 'groq':
+                print("🚀 Usando Groq API (más rápida y permisiva)")
+                self.api_url = "https://api.groq.com/openai/v1/chat/completions"
+            else:
+                print("🧠 Usando Gemini API (con limitaciones)")
+                self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
         
         # Operadores seguros para evaluación
         self.operators = {
@@ -129,76 +135,84 @@ class MathChatBot:
         
         return function_str
     
+    def natural_language_to_expression(self, message):
+        """Convierte frases comunes en español a notación algebraica"""
+        msg = message.lower()
+        # Potencias
+        msg = re.sub(r'x\s*al\s*cuadrado', 'x^2', msg)
+        msg = re.sub(r'x\s*al\s*cubo', 'x^3', msg)
+        msg = re.sub(r'x\s*a\s*la\s*quarta', 'x^4', msg)
+        msg = re.sub(r'x\s*a\s*la\s*quinta', 'x^5', msg)
+        msg = re.sub(r'x\s*elevado\s*a\s*(\d+)', r'x^\1', msg)
+        # Sumas y restas
+        msg = re.sub(r'más', '+', msg)
+        msg = re.sub(r'menos', '-', msg)
+        # Multiplicaciones implícitas
+        msg = re.sub(r'(\d+)\s*x', r'\1x', msg)
+        # Eliminar palabras innecesarias
+        msg = re.sub(r'grafica?r?\s*', '', msg)
+        msg = re.sub(r'dibuja?r?\s*', '', msg)
+        msg = re.sub(r'la\s*función\s*', '', msg)
+        msg = re.sub(r'función\s*', '', msg)
+        msg = re.sub(r'\s+', ' ', msg)
+        return msg.strip()
+    
     def parse_chart_request(self, message):
-        """Analizar qué tipo de gráfica quiere el usuario"""
+        """Analizar qué tipo de gráfica quiere el usuario, soportando frases naturales y múltiples funciones"""
+        message = self.natural_language_to_expression(message)
         message_lower = message.lower()
         
-        # Detectar funciones específicas
+        # Separar múltiples funciones por coma, 'y', 'vs', 'versus'
+        split_patterns = [',', ' y ', ' vs ', ' versus ', ' contra ']
+        for pat in split_patterns:
+            if pat in message:
+                parts = [p.strip() for p in message.split(pat) if p.strip()]
+                break
+        else:
+            parts = [message]
+        
         functions = []
-        
-        # Buscar patrones de funciones algebraicas (3x+2, 2x-1, etc.)
-        algebraic_patterns = [
-            r'f\(x\)\s*=\s*([^,\.!?]+)',  # f(x) = 3x+2
-            r'grafica?\s+([^,\.!?]+?)(?:\s+de\s+|\s*$)',  # grafica 3x+2
-            r'dibuja?\s+([^,\.!?]+?)(?:\s+de\s+|\s*$)',   # dibuja 3x+2
-        ]
-        
-        # Buscar funciones algebraicas
-        function_found = False
-        for pattern in algebraic_patterns:
-            match = re.search(pattern, message_lower)
-            if match:
-                function_str = match.group(1).strip()
-                
-                # Verificar si es una función algebraica válida
-                if self.is_algebraic_function(function_str):
-                    # Convertir a formato evaluable
-                    normalized = self.normalize_function(function_str)
-                    
+        for part in parts:
+            # Buscar patrones algebraicos
+            algebraic_patterns = [
+                r'f\(x\)\s*=\s*([^,\.\!?]+)',  # f(x) = 3x+2
+                r'([\-\+]?\d*\.?\d*x(\^\d+)?([\+\-]\d+)?)+',  # 3x+2, -x^2+1, etc.
+                r'(sin|cos|tan|log|exp|sqrt|abs)\s*\(.*?\)',  # sin(x), log(x+1), etc.
+                r'x\^\d+',  # x^2, x^3, etc.
+                r'x',  # x solo
+            ]
+            found = False
+            for pattern in algebraic_patterns:
+                match = re.search(pattern, part)
+                if match:
+                    expr = match.group(0).strip()
+                    normalized = self.normalize_function(expr)
                     functions.append({
                         'type': 'algebraic',
                         'expression': normalized,
-                        'original': function_str
+                        'original': expr
                     })
-                    function_found = True
+                    found = True
                     break
-        
-        # Funciones predefinidas si no se encontró algebraica
-        if not function_found:
-            # Funciones trigonométricas
-            if 'sin' in message_lower and 'asin' not in message_lower:
-                functions.append({'type': 'predefined', 'name': 'sin'})
-            if 'cos' in message_lower and 'acos' not in message_lower:
-                functions.append({'type': 'predefined', 'name': 'cos'})
-            if 'tan' in message_lower and 'atan' not in message_lower:
-                functions.append({'type': 'predefined', 'name': 'tan'})
-            
-            # Funciones algebraicas simples
-            if any(term in message_lower for term in ['x^2', 'x²', 'cuadrática']) and not functions:
-                functions.append({'type': 'predefined', 'name': 'x^2'})
-            if any(term in message_lower for term in ['x^3', 'x³', 'cúbica']) and not functions:
-                functions.append({'type': 'predefined', 'name': 'x^3'})
-            
-            # Otras funciones
-            if 'log' in message_lower:
-                functions.append({'type': 'predefined', 'name': 'log'})
-            if 'exp' in message_lower:
-                functions.append({'type': 'predefined', 'name': 'exp'})
-            if 'sqrt' in message_lower or '√' in message:
-                functions.append({'type': 'predefined', 'name': 'sqrt'})
-            if 'abs' in message_lower:
-                functions.append({'type': 'predefined', 'name': 'abs'})
-        
-        # Detectar rangos
+            # Si no es algebraica, probar predefinidas
+            if not found:
+                predefs = {
+                    'sin': 'sin', 'cos': 'cos', 'tan': 'tan', 'log': 'log', 'exp': 'exp',
+                    'sqrt': 'sqrt', 'abs': 'abs', 'x^2': 'x^2', 'x^3': 'x^3'
+                }
+                for key, val in predefs.items():
+                    if key in part:
+                        functions.append({'type': 'predefined', 'name': val})
+                        found = True
+                        break
+        # Rango
         range_match = re.search(r'de\s+(-?\d+)\s+a\s+(-?\d+)', message_lower)
         if range_match:
             x_range = [int(range_match.group(1)), int(range_match.group(2))]
         else:
-            x_range = [-10, 10]  # Rango por defecto
-        
-        # Detectar comparaciones
-        is_comparison = any(word in message_lower for word in ['compara', 'vs', 'versus', 'contra'])
-        
+            x_range = [-10, 10]
+        # Comparación
+        is_comparison = len(functions) > 1
         return {
             'functions': functions,
             'range': x_range,
@@ -472,43 +486,101 @@ class MathChatBot:
         return message.strip()
     
     def get_ai_response_sync(self, message):
-        """Obtener respuesta de la IA con rate limiting ULTRA conservador"""
+        """Obtener respuesta de IA usando Groq (más permisivo) o Gemini como fallback"""
         if not self.api_key:
             return None
         
-        # Rate limiting de 15 segundos mínimo
+        # Rate limiting más relajado - 2 segundos para Groq
         current_time = time.time()
         time_since_last = current_time - self.last_api_call
         
         if time_since_last < self.min_interval:
             sleep_time = self.min_interval - time_since_last
-            print(f"⏳ Esperando {sleep_time:.0f}s para respetar rate limit de Google")
+            print(f"⏳ Esperando {sleep_time:.1f}s")
             time.sleep(sleep_time)
         
         try:
             self.last_api_call = time.time()
             
-            # Payload MÍNIMO para reducir carga
+            if self.api_provider == 'groq':
+                return self.use_groq_api(message)
+            else:
+                return self.use_gemini_api(message)
+                
+        except Exception as e:
+            print(f"❌ Error con IA: {str(e)}")
+            return None
+    
+    def use_groq_api(self, message):
+        """Usar Groq API (mucho más permisiva que Gemini)"""
+        try:
+            payload = {
+                "model": "llama-3.1-8b-instant",  # Modelo gratuito muy rápido
+                "messages": [
+                    {
+                        "role": "system", 
+                        "content": "Eres un profesor de matemáticas experto y amigable. Explica conceptos claramente y proporciona ejemplos útiles. Sé conciso pero educativo."
+                    },
+                    {
+                        "role": "user", 
+                        "content": message
+                    }
+                ],
+                "max_tokens": 400,
+                "temperature": 0.7,
+                "stream": False
+            }
+            
+            response = requests.post(
+                self.api_url,
+                headers={
+                    'Authorization': f'Bearer {self.api_key}',
+                    'Content-Type': 'application/json'
+                },
+                json=payload,
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'choices' in data and len(data['choices']) > 0:
+                    ai_response = data['choices'][0]['message']['content']
+                    print("✅ IA respondió exitosamente (Groq)")
+                    return ai_response.strip()
+            
+            elif response.status_code == 429:
+                print("⚠️ Rate limit en Groq")
+                return None
+            else:
+                print(f"❌ Error Groq {response.status_code}: {response.text[:200]}")
+                return None
+                
+        except Exception as e:
+            print(f"⚠️ Error con Groq: {str(e)}")
+            return None
+    
+    def use_gemini_api(self, message):
+        """Fallback: Usar Gemini API (más restrictiva)"""
+        try:
             payload = {
                 "contents": [{
                     "parts": [{
-                        "text": message[:200]  # Limitar a 200 caracteres
+                        "text": f"Como profesor de matemáticas, responde: {message[:150]}"
                     }]
                 }],
                 "generationConfig": {
-                    "temperature": 0.5,
-                    "maxOutputTokens": 150  # Respuestas muy cortas
+                    "temperature": 0.7,
+                    "maxOutputTokens": 300
                 }
             }
             
             response = requests.post(
-                self.gemini_url,
+                self.api_url,
                 headers={
-                    'Content-Type': 'application/json',
-                    'x-goog-api-key': self.api_key
+                    'Content-Type': 'application/json'
                 },
                 json=payload,
-                timeout=30
+                timeout=20
             )
             
             if response.status_code == 200:
@@ -517,18 +589,18 @@ class MathChatBot:
                     candidate = data['candidates'][0]
                     if 'content' in candidate and 'parts' in candidate['content']:
                         ai_response = candidate['content']['parts'][0]['text']
-                        print("✅ IA respondió exitosamente")
+                        print("✅ IA respondió exitosamente (Gemini)")
                         return ai_response.strip()
             
             elif response.status_code == 429:
-                print("⚠️ Rate limit - Google necesita más tiempo entre requests")
+                print("⚠️ Rate limit en Gemini")
                 return None
             else:
-                print(f"❌ Error {response.status_code}: {response.text[:100]}")
+                print(f"❌ Error Gemini {response.status_code}")
                 return None
                 
         except Exception as e:
-            print(f"❌ Error: {str(e)}")
+            print(f"⚠️ Error con Gemini: {str(e)}")
             return None
     
     def get_fallback_response(self, message):
@@ -564,6 +636,19 @@ class MathChatBot:
         
         return f"Entiendo que preguntas sobre '{message}'. Puedo ayudarte con cálculos, conceptos matemáticos y crear gráficas de funciones. ¿Podrías ser más específico?"
     
+    def is_conceptual_request(self, message):
+        """Detectar si el usuario pide una explicación, ejemplo o concepto matemático"""
+        conceptual_keywords = [
+            'ejemplo', 'ejemplos', 'explica', 'explicación', 'qué es', 'que es', 'definición',
+            'derivada', 'integral', 'teorema', 'propiedad', 'demuestra', 'demostración',
+            'cómo funciona', 'como funciona', 'para qué sirve', 'para que sirve', 'aplicación', 'aplicaciones',
+            'historia', 'origen', 'uso', 'usos', 'ventaja', 'ventajas', 'desventaja', 'desventajas',
+            'característica', 'características', 'concepto', 'introducción', 'fundamento', 'fundamentos',
+            'explicame', 'describe', 'descripción', 'ejercicios resueltos', 'ejercicio resuelto', 'ejercicio', 'ejercicios'
+        ]
+        message_lower = message.lower()
+        return any(word in message_lower for word in conceptual_keywords)
+    
     def get_response(self, message):
         """Método principal para obtener respuestas del chatbot"""
         try:
@@ -579,7 +664,25 @@ class MathChatBot:
                 self.context.pop(0)
             
             print(f"🤔 Analizando: {message}")
-            
+
+            # PASO 0: Verificar si es una solicitud conceptual o de ejemplos
+            if self.is_conceptual_request(message):
+                print("📚 Solicitud conceptual detectada")
+                if self.api_key:
+                    ai_explanation = self.get_ai_response_sync(
+                        f"Da una explicación clara, breve y con ejemplos sobre: {message}"
+                    )
+                    response_text = ai_explanation if ai_explanation else "Aquí tienes una explicación sobre el tema solicitado."
+                else:
+                    response_text = "Puedo darte ejemplos y explicaciones de temas matemáticos. ¿Sobre qué tema específico quieres saber más?"
+                self.conversation_history.append((message, response_text))
+                if len(self.conversation_history) > 5:
+                    self.conversation_history.pop(0)
+                return {
+                    'response': response_text,
+                    'type': 'concept'
+                }
+
             # PASO 1: Verificar si es una solicitud de gráfica
             if self.is_chart_request(message):
                 print("📊 Detectada solicitud de gráfica")
@@ -601,19 +704,20 @@ class MathChatBot:
                             else:
                                 function_names.append(f)
                         
-                        response_text = f"Aquí tienes la gráfica de {', '.join(function_names)}."
+                        # Intentar explicación con IA
+                        if self.api_key:
+                            ai_explanation = self.get_ai_response_sync(
+                                f"Explica brevemente la función matemática {', '.join(function_names)} y sus características principales."
+                            )
+                            response_text = ai_explanation if ai_explanation else f"Aquí tienes la gráfica de {', '.join(function_names)}."
+                        else:
+                            response_text = f"Aquí tienes la gráfica de {', '.join(function_names)}."
                         
                         # Guardar en historial
                         self.conversation_history.append((message, response_text))
                         if len(self.conversation_history) > 5:
                             self.conversation_history.pop(0)
                         
-                        return {
-                            'response': response_text,
-                            'type': 'chart',
-                            'chart_data': chart_data
-                        }
-                    else:
                         return {
                             'response': "Lo siento, hubo un problema generando la gráfica. ¿Podrías intentar con una función más simple?",
                             'type': 'text'
@@ -639,7 +743,18 @@ class MathChatBot:
                     
                     print(f"✅ Resultado calculado: {formatted_result}")
                     
-                    response_text = f"**Resultado:** {formatted_result}"
+                    # Intentar explicación con IA
+                    if self.api_key:
+                        ai_explanation = self.get_ai_response_sync(
+                            f"El usuario calculó '{expression}' = {formatted_result}. Explica brevemente esta operación matemática."
+                        )
+                        
+                        if ai_explanation:
+                            response_text = f"**Resultado:** {formatted_result}\n\n{ai_explanation}"
+                        else:
+                            response_text = f"**Resultado:** {formatted_result}"
+                    else:
+                        response_text = f"**Resultado:** {formatted_result}"
                     
                     # Guardar en historial
                     self.conversation_history.append((message, response_text))
@@ -656,19 +771,9 @@ class MathChatBot:
                     # Si falla el cálculo, continuar a IA
                     pass
             
-            # PASO 3: IA Conversacional CON INFORMACIÓN DE TIMING
+            # PASO 3: IA Conversacional
             if self.api_key:
                 print("🧠 Consultando IA...")
-                
-                # Verificar si hace poco se usó la IA
-                time_since_last = time.time() - self.last_api_call
-                if time_since_last < self.min_interval:
-                    remaining = self.min_interval - time_since_last
-                    return {
-                        'response': f"🤖 IA disponible en {remaining:.0f} segundos debido a límites de Google. Mientras tanto, puedo ayudarte con cálculos matemáticos (ej: 2+2) o gráficas (ej: grafica sin(x)).",
-                        'type': 'rate_limit_info'
-                    }
-                
                 ai_response = self.get_ai_response_sync(message)
                 
                 if ai_response:
@@ -682,12 +787,9 @@ class MathChatBot:
                         'type': 'conversation'
                     }
                 else:
-                    return {
-                        'response': "🤖 IA temporalmente limitada por Google. Puedo ayudarte con cálculos (2+2) o gráficas (grafica sin(x)).",
-                        'type': 'ai_limited'
-                    }
+                    print("⚠️ IA no respondió, usando fallback")
             
-            # PASO 4: Fallback cuando no hay API key
+            # PASO 4: Fallback cuando no hay IA disponible
             print("⚠️ Usando fallback")
             fallback_response = self.get_fallback_response(message)
             return {
