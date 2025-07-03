@@ -24,12 +24,12 @@ class MathChatBot {
         this.examplesVisible = false;
         this.chartsVisible = false;
         this.currentCategory = 'basico';
-        this.welcomePanelHidden = false; // Nuevo: para rastrear si ya se ocultó
+        this.welcomePanelHidden = false; 
         
         // Contador para gráficas únicas
         this.chartCount = 0;
         
-        // URLs del backend - MEJORADO PARA PRODUCCIÓN
+        // URLs del backend 
         this.apiUrl = this.getApiUrl() + '/api/chat';
         this.healthUrl = this.getApiUrl() + '/health';
         
@@ -53,7 +53,7 @@ class MathChatBot {
             }
         };
         
-        // Sugerencias automáticas (incluyendo gráficas)
+        // Sugerencias automáticas
         this.suggestions_data = [
             '2+2', 'sqrt(16)', 'sin(pi/2)', 'qué es pi',
             'log(100)', 'factorial(5)', 'grafica sin(x)', 'grafica x^2',
@@ -64,12 +64,10 @@ class MathChatBot {
     }
     
     getApiUrl() {
-        // Obtener URL base de la API según el entorno
-        // En desarrollo local
+        // No se te vaya a olvidar hacer la comunicacion con la API
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
             return 'http://localhost:5000';
         } else {
-            // En producción, usar la misma URL base
             return window.location.origin;
         }
     }

@@ -10,7 +10,6 @@ from fractions import Fraction
 import ast
 import operator
 
-# Configurar precisión decimal
 getcontext().prec = 50
 
 class MathChatBot:
@@ -21,11 +20,10 @@ class MathChatBot:
         self.last_result = None
         self.variables = {}
         
-        # Rate limiting más relajado para Groq - 2 segundos
         self.last_api_call = 0
-        self.min_interval = 2.0  # Groq es mucho más permisivo
+        self.min_interval = 2.0  
         
-        # API Key - Ahora soporta múltiples proveedores
+        # API Key 
         self.api_key = os.getenv('GROQ_API_KEY') or os.getenv('GEMINI_API_KEY')
         self.api_provider = 'groq' if os.getenv('GROQ_API_KEY') else 'gemini'
         
@@ -106,9 +104,9 @@ class MathChatBot:
         
         # Patrones específicos
         chart_patterns = [
-            r'grafica?\s+\w+\s*\(',  # "grafica sin(x)"
-            r'compara?\s+\w+.*vs.*\w+',  # "compara sin vs cos"
-            r'dibuja?\s+la\s+función',  # "dibuja la función"
+            r'grafica?\s+\w+\s*\(',  
+            r'compara?\s+\w+.*vs.*\w+',  
+            r'dibuja?\s+la\s+función', 
         ]
         
         has_pattern = any(re.search(pattern, message.lower()) for pattern in chart_patterns)
